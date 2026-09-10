@@ -23,7 +23,7 @@
   .note{font-size:12px;color:var(--muted);margin-top:10px;line-height:1.45}.summary{white-space:pre-wrap;background:var(--soft);border:1px solid var(--line);border-radius:14px;padding:14px;font-size:13px;line-height:1.5;min-height:120px}
   .custom-row{display:grid;grid-template-columns:1fr 2fr auto;gap:8px;align-items:end;margin-top:10px}.custom-row button{border:1px solid var(--line);background:#fff;border-radius:10px;padding:11px 12px;cursor:pointer}.gold-note{background:var(--soft);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:14px}.gold-note strong{display:block;margin-bottom:6px}
   .sharebox{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin:14px 0}.sharebox h3{margin:0 0 5px;font-size:15px}.sharebox p{margin:0 0 10px;color:var(--muted);font-size:12px;line-height:1.45}.linkline{display:flex;gap:8px}.linkline input{margin:0}.toast{display:none;margin-top:8px;font-size:12px;color:var(--ok);font-weight:600}
-  .consent{display:flex;gap:10px;align-items:flex-start;margin-top:12px;font-size:12px;color:var(--muted);line-height:1.4}.consent input{width:auto;margin-top:2px}
+  .consent{display:flex;gap:10px;align-items:flex-start;margin-top:12px;font-size:12px;color:var(--muted);line-height:1.4}.consent input{width:auto;margin-top:2px}.submit-status{margin-top:10px;font-size:13px;font-weight:600}.submit-status.ok{color:var(--ok)}.submit-status.err{color:#9b2c2c}
   @media(max-width:720px){.profile{grid-template-columns:1fr}.photo{height:220px}.grid,.section{grid-template-columns:1fr}.topbar{flex-direction:column}.custom-row{grid-template-columns:1fr}.status{white-space:normal}.linkline{flex-direction:column}}
 </style>
 </head>
@@ -95,7 +95,7 @@
     <div id="summary" class="summary">Complete the profile, then select “Generate summary.”</div>
     <label class="consent"><input type="checkbox" id="consent"> <span>I understand that I am choosing to share these service preferences with the concierge team for resident service purposes.</span></label>
     <div class="share-actions"><button class="btn secondary" id="generate" type="button">Generate summary</button><button class="btn primary" id="submitProfile" type="button">Submit profile</button><button class="btn secondary" id="emailProfile" type="button">Send with email app</button><button class="btn secondary" id="outlookProfile" type="button">Send in browser</button><button class="btn soft" id="copySummary" type="button">Copy summary</button></div>
-    <div class="note">“Send with email app” uses the device's default email app. “Send in browser” opens Outlook on the web, which can work even when no desktop email app is configured. The resident remains in control and chooses whether to send.</div>
+    <div id="submitStatus" class="submit-status" role="status" aria-live="polite"></div><div class="note">“Submit profile” sends the completed preference summary securely through the form service. The email options remain available as a backup.</div>
   </section>
 </div>
 <script>
@@ -145,7 +145,50 @@ ${buildSummary()}
 
 Thank you.`}
 document.getElementById('generate').onclick=()=>document.getElementById('summary').textContent=buildSummary();
-document.getElementById('submitProfile').onclick=()=>{if(!ensureConsent())return;document.getElementById('summary').textContent=buildSummary();const choice=confirm('Press OK to open your email app, or Cancel to use Outlook in your browser.');if(choice){location.href=`mailto:${DEST}?subject=${encodeURIComponent(subject())}&body=${encodeURIComponent(body())}`}else{window.open(`https://outlook.live.com/mail/0/deeplink/compose?to=${encodeURIComponent(DEST)}&subject=${encodeURIComponent(subject())}&body=${encodeURIComponent(body())}`,'_blank','noopener')}};
+document.getElementById('submitProfile').onclick=async()=>{
+  if(!ensureConsent())return;
+  const btn=document.getElementById('submitProfile');
+  const status=document.getElementById('submitStatus');
+  const summary=buildSummary();
+  document.getElementById('summary').textContent=summary;
+  status.className='submit-status';
+  status.textContent='Sending…';
+  btn.disabled=true;
+  btn.textContent='Sending…';
+  try{
+    const payload={
+      _subject: subject(),
+      resident_name: v('name')||'Not provided',
+      unit: v('unit')||'Not provided',
+      preferred_name: v('preferred')||'Not provided',
+      preferred_contact: v('contact')||'Not provided',
+      preference_summary: summary,
+      consent: 'Yes'
+    };
+    const response=await fetch('https://formspree.io/f/xljezwll',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','Accept':'application/json'},
+      body:JSON.stringify(payload)
+    });
+    if(!response.ok){
+      let message='Submission could not be sent.';
+      try{
+        const data=await response.json();
+        if(data && data.errors && data.errors.length) message=data.errors.map(e=>e.message).join(' ');
+      }catch(e){}
+      throw new Error(message);
+    }
+    status.className='submit-status ok';
+    status.textContent='Thank you. Your preferences were submitted successfully.';
+    btn.textContent='Submitted';
+  }catch(err){
+    status.className='submit-status err';
+    status.textContent='Unable to submit right now. Please use one of the email options below or try again.';
+    btn.textContent='Submit profile';
+  }finally{
+    btn.disabled=false;
+  }
+};
 document.getElementById('emailProfile').onclick=()=>{if(!ensureConsent())return;document.getElementById('summary').textContent=buildSummary();location.href=`mailto:${DEST}?subject=${encodeURIComponent(subject())}&body=${encodeURIComponent(body())}`};
 document.getElementById('outlookProfile').onclick=()=>{if(!ensureConsent())return;document.getElementById('summary').textContent=buildSummary();window.open(`https://outlook.live.com/mail/0/deeplink/compose?to=${encodeURIComponent(DEST)}&subject=${encodeURIComponent(subject())}&body=${encodeURIComponent(body())}`,'_blank','noopener')};
 document.getElementById('copySummary').onclick=async()=>{const text=buildSummary();document.getElementById('summary').textContent=text;await navigator.clipboard.writeText(text);alert('Preference summary copied.')};
